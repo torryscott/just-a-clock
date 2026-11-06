@@ -6,7 +6,8 @@
 <title>Just a Clock</title>
 <link rel="icon" href="data:,">
 <style>
-  html, body { height: 100%; margin: 0; background: #000; color: #fff; }
+  :root { --bg: #000; --fg: #fff; --dim: #ccc; --quiet: #999; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
   body {
     display: grid;
     place-items: center;
@@ -22,24 +23,49 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  #seconds { margin-left: .15em; font-size: .35em; color: #ccc; }
-  #hint {
+  #side { display: inline-block; margin-left: .15em; font-size: .35em; line-height: 1; color: var(--dim); }
+  #side span { display: block; }
+  #ampm { margin-bottom: .63em; font-size: .8em; }
+  #controls {
     position: fixed;
     inset: auto 0 16px;
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
     font-size: 16px;
-    color: #888;
+    color: var(--quiet);
     transition: opacity .3s;
   }
-  body.idle #hint, :fullscreen #hint { opacity: 0; }
+  body.idle #controls { opacity: 0; pointer-events: none; }
+  :fullscreen #hint { display: none; }
+  #colors { display: flex; gap: 8px; }
+  #colors button {
+    width: 48px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid #888;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  #colors button[aria-pressed="true"] { outline: 3px solid var(--fg); outline-offset: 2px; }
 </style>
 </head>
 <body>
-<div id="clock" role="timer"><span id="time"></span><span id="seconds"></span></div>
-<div id="hint">Click for full screen</div>
+<div id="clock" role="timer"><span id="time"></span><span id="side"><span id="ampm"></span><span id="seconds"></span></span></div>
+<div id="controls">
+  <div id="colors" role="group" aria-label="Clock colors"></div>
+  <div id="hint">Click for full screen</div>
+</div>
 <script>
 const clock = document.getElementById("clock");
 const timeEl = document.getElementById("time");
+const ampmEl = document.getElementById("ampm");
 const secondsEl = document.getElementById("seconds");
 const hint = document.getElementById("hint");
 
@@ -56,6 +82,7 @@ function tick() {
   const now = Date.now() + offset;
   const d = new Date(now);
   timeEl.textContent = (d.getHours() % 12 || 12) + ":" + pad(d.getMinutes());
+  ampmEl.textContent = d.getHours() < 12 ? "AM" : "PM";
   secondsEl.textContent = pad(d.getSeconds());
   timer = setTimeout(tick, 1000 - now % 1000);
 }
@@ -99,14 +126,23 @@ async function sync() {
 // Fit the widest possible time so the digits never change size during the day.
 function fit() {
   const time = timeEl.textContent;
+  const ampm = ampmEl.textContent;
   const seconds = secondsEl.textContent;
   timeEl.textContent = "12:00";
   secondsEl.textContent = "00";
   clock.style.fontSize = "100px";
-  const box = clock.getBoundingClientRect();
-  const scale = Math.min(innerWidth * 0.94 / box.width, innerHeight * 0.9 / box.height);
+  let width = 0;
+  let height = 0;
+  for (const label of ["AM", "PM"]) {
+    ampmEl.textContent = label;
+    const box = clock.getBoundingClientRect();
+    width = Math.max(width, box.width);
+    height = Math.max(height, box.height);
+  }
+  const scale = Math.min(innerWidth * 0.94 / width, innerHeight * 0.9 / height);
   clock.style.fontSize = 100 * scale + "px";
   timeEl.textContent = time;
+  ampmEl.textContent = ampm;
   secondsEl.textContent = seconds;
 }
 
@@ -120,11 +156,53 @@ async function keepAwake() {
   } catch {}
 }
 
+// ---- Colors ----
+const PALETTES = [
+  { name: "White on black", bg: "#000000", fg: "#ffffff", dim: "#cccccc", quiet: "#999999" },
+  { name: "Black on white", bg: "#ffffff", fg: "#000000", dim: "#333333", quiet: "#595959" },
+  { name: "Yellow on black", bg: "#000000", fg: "#ffc400", dim: "#e0ac00", quiet: "#999999" },
+  { name: "White on navy", bg: "#0b2a5b", fg: "#ffffff", dim: "#d6e0f0", quiet: "#b8c7e0" },
+];
+const COLORS_KEY = "just-a-clock-colors";
+const colorsEl = document.getElementById("colors");
+
+function setColors(palette) {
+  const root = document.documentElement.style;
+  for (const part of ["bg", "fg", "dim", "quiet"]) root.setProperty("--" + part, palette[part]);
+  for (const button of colorsEl.children) {
+    button.setAttribute("aria-pressed", String(button.title === palette.name));
+  }
+}
+
+for (const palette of PALETTES) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "12";
+  button.title = palette.name;
+  button.setAttribute("aria-label", palette.name);
+  button.style.background = palette.bg;
+  button.style.color = palette.fg;
+  button.addEventListener("click", () => {
+    setColors(palette);
+    try {
+      localStorage.setItem(COLORS_KEY, palette.name);
+    } catch {}
+  });
+  colorsEl.append(button);
+}
+
+let savedColors = null;
+try {
+  savedColors = localStorage.getItem(COLORS_KEY);
+} catch {}
+setColors(PALETTES.find(palette => palette.name === savedColors) || PALETTES[0]);
+
 // ---- Full screen and cursor ----
 if (!document.documentElement.requestFullscreen) hint.hidden = true;
 
-addEventListener("click", () => {
+addEventListener("click", event => {
   keepAwake();
+  if (event.target.closest("button")) return;
   if (document.fullscreenElement) {
     document.exitFullscreen();
   } else if (document.documentElement.requestFullscreen) {
@@ -141,6 +219,7 @@ function showCursor() {
 }
 
 addEventListener("mousemove", showCursor);
+addEventListener("keydown", showCursor);
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
