@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Just a Clock</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { height: 100%; margin: 0; background: #000; color: #fff; }
+  body {
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  body.idle { cursor: none; }
+  #clock {
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  #seconds { margin-left: .15em; font-size: .35em; color: #ccc; }
+  #hint {
+    position: fixed;
+    inset: auto 0 16px;
+    text-align: center;
+    font-size: 16px;
+    color: #888;
+    transition: opacity .3s;
+  }
+  body.idle #hint, :fullscreen #hint { opacity: 0; }
+</style>
+</head>
+<body>
+<div id="clock" role="timer"><span id="time"></span><span id="seconds"></span></div>
+<div id="hint">Click for full screen</div>
+<script>
+const clock = document.getElementById("clock");
+const timeEl = document.getElementById("time");
+const secondsEl = document.getElementById("seconds");
+const hint = document.getElementById("hint");
+
+// ---- Time ----
+// The time comes from the computer's own clock, read fresh every tick, so it
+// cannot drift. If that clock is wrong, sync() corrects it from the web server.
+let offset = 0;
+let timer;
+
+const pad = n => String(n).padStart(2, "0");
+
+function tick() {
+  clearTimeout(timer);
+  const now = Date.now() + offset;
+  const d = new Date(now);
+  timeEl.textContent = (d.getHours() % 12 || 12) + ":" + pad(d.getMinutes());
+  secondsEl.textContent = pad(d.getSeconds());
+  timer = setTimeout(tick, 1000 - now % 1000);
+}
+
+// ---- Correcting a wrong computer clock ----
+// GitHub Pages stamps every response with the current time in its Date header.
+// That header only has one-second resolution, so a difference under two seconds
+// is treated as noise and a correctly set computer clock is left alone. If the
+// network is down or the samples disagree, nothing changes.
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function sample() {
+  const sent = Date.now();
+  const res = await fetch(location.pathname, { method: "HEAD", cache: "no-store" });
+  const received = Date.now();
+  const server = Date.parse(res.headers.get("date"));
+  if (!res.ok || isNaN(server) || received - sent > 2000) return null;
+  // The header drops the fraction of a second, so add back half a second on average.
+  return server + 500 - (sent + received) / 2;
+}
+
+async function sync() {
+  const samples = [];
+  for (let i = 0; i < 5; i++) {
+    try {
+      const s = await sample();
+      if (s !== null) samples.push(s);
+    } catch {}
+    await wait(700);
+  }
+  samples.sort((a, b) => a - b);
+  if (samples.length < 3 || samples[samples.length - 1] - samples[0] > 2000) return;
+  const median = samples[samples.length >> 1];
+  if (Math.abs(median - offset) > 2000) {
+    offset = median;
+    tick();
+  }
+}
+
+// ---- Size ----
+// Fit the widest possible time so the digits never change size during the day.
+function fit() {
+  const time = timeEl.textContent;
+  const seconds = secondsEl.textContent;
+  timeEl.textContent = "12:00";
+  secondsEl.textContent = "00";
+  clock.style.fontSize = "100px";
+  const box = clock.getBoundingClientRect();
+  const scale = Math.min(innerWidth * 0.94 / box.width, innerHeight * 0.9 / box.height);
+  clock.style.fontSize = 100 * scale + "px";
+  timeEl.textContent = time;
+  secondsEl.textContent = seconds;
+}
+
+// ---- Keep the screen on ----
+let lock;
+
+async function keepAwake() {
+  if (lock && !lock.released) return;
+  try {
+    lock = await navigator.wakeLock.request("screen");
+  } catch {}
+}
+
+// ---- Full screen and cursor ----
+if (!document.documentElement.requestFullscreen) hint.hidden = true;
+
+addEventListener("click", () => {
+  keepAwake();
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+});
+
+let idleTimer;
+
+function showCursor() {
+  document.body.classList.remove("idle");
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => document.body.classList.add("idle"), 3000);
+}
+
+addEventListener("mousemove", showCursor);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  tick();
+  keepAwake();
+});
+
+addEventListener("resize", fit);
+
+tick();
+fit();
+showCursor();
+keepAwake();
+sync();
+setInterval(sync, 5 * 60 * 1000);
+</script>
+</body>
+</html>
