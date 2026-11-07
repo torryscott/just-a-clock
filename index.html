@@ -39,28 +39,40 @@
   }
   body.idle #controls { opacity: 0; pointer-events: none; }
   :fullscreen #hint { display: none; }
-  #colors { display: flex; gap: 8px; }
-  #colors button {
-    width: 48px;
+  #tools { display: flex; align-items: center; gap: 10px; }
+  #tools button {
     height: 34px;
-    padding: 0;
+    padding: 0 12px;
     border: 1px solid #888;
     border-radius: 6px;
+    background: transparent;
+    color: var(--fg);
     font-family: inherit;
     font-size: 16px;
-    font-weight: 700;
     line-height: 1;
-    font-variant-numeric: tabular-nums;
     cursor: pointer;
   }
-  #colors button[aria-pressed="true"] { outline: 3px solid var(--fg); outline-offset: 2px; }
+  #tools button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+  #colors { width: 48px; padding: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #size[aria-expanded="true"] { border-color: var(--fg); }
+  #size-row { display: flex; align-items: center; gap: 8px; }
+  #size-row[hidden] { display: none; }
+  #size-slider { width: 180px; accent-color: var(--fg); }
+  #size-value { min-width: 4ch; color: var(--fg); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
 <div id="clock" role="timer"><span id="time"></span><span id="side"><span id="ampm"></span><span id="seconds"></span></span></div>
 <div id="controls">
-  <div id="colors" role="group" aria-label="Clock colors"></div>
-  <div id="hint">Click for full screen</div>
+  <div id="tools">
+    <button id="colors" type="button">12</button>
+    <button id="size" type="button" aria-expanded="false" aria-controls="size-row">Size</button>
+    <div id="size-row" hidden>
+      <input id="size-slider" type="range" min="25" max="100" step="1" value="100" aria-label="Clock size, as a percentage of the largest that fits">
+      <span id="size-value" aria-hidden="true">100%</span>
+    </div>
+  </div>
+  <div id="hint">Click the clock for full screen</div>
 </div>
 <script>
 const clock = document.getElementById("clock");
@@ -122,8 +134,31 @@ async function sync() {
   }
 }
 
+// ---- Saved settings ----
+function remember(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+function recall(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 // ---- Size ----
-// Fit the widest possible time so the digits never change size during the day.
+// Fit the widest possible time so the digits never change size during the day,
+// then scale it by the slider: 100% is as big as fits on the screen.
+const SIZE_KEY = "just-a-clock-size";
+const sizeButton = document.getElementById("size");
+const sizeRow = document.getElementById("size-row");
+const sizeSlider = document.getElementById("size-slider");
+const sizeValue = document.getElementById("size-value");
+let sizePercent = 100;
+
 function fit() {
   const time = timeEl.textContent;
   const ampm = ampmEl.textContent;
@@ -140,11 +175,35 @@ function fit() {
     height = Math.max(height, box.height);
   }
   const scale = Math.min(innerWidth * 0.94 / width, innerHeight * 0.9 / height);
-  clock.style.fontSize = 100 * scale + "px";
+  clock.style.fontSize = scale * sizePercent + "px";
   timeEl.textContent = time;
   ampmEl.textContent = ampm;
   secondsEl.textContent = seconds;
 }
+
+function setSize(percent) {
+  // Nothing saved yet reads as null or "", which must mean 100%, not 0%.
+  const n = percent === null || String(percent).trim() === "" ? 100 : Math.round(Number(percent));
+  sizePercent = Number.isFinite(n) ? Math.min(100, Math.max(25, n)) : 100;
+  sizeSlider.value = sizePercent;
+  sizeValue.textContent = sizePercent + "%";
+}
+
+sizeButton.addEventListener("click", () => {
+  const open = sizeRow.hidden;
+  sizeRow.hidden = !open;
+  sizeButton.setAttribute("aria-expanded", String(open));
+  if (open) sizeSlider.focus();
+});
+
+sizeSlider.addEventListener("input", () => {
+  setSize(sizeSlider.value);
+  fit();
+});
+
+sizeSlider.addEventListener("change", () => remember(SIZE_KEY, sizePercent));
+
+setSize(recall(SIZE_KEY));
 
 // ---- Keep the screen on ----
 let lock;
@@ -157,6 +216,7 @@ async function keepAwake() {
 }
 
 // ---- Colors ----
+// One button cycles through the choices. Its face shows the colors in use.
 const PALETTES = [
   { name: "White on black", bg: "#000000", fg: "#ffffff", dim: "#cccccc", quiet: "#999999" },
   { name: "Black on white", bg: "#ffffff", fg: "#000000", dim: "#333333", quiet: "#595959" },
@@ -164,45 +224,34 @@ const PALETTES = [
   { name: "White on navy", bg: "#0b2a5b", fg: "#ffffff", dim: "#d6e0f0", quiet: "#b8c7e0" },
 ];
 const COLORS_KEY = "just-a-clock-colors";
-const colorsEl = document.getElementById("colors");
+const colorsButton = document.getElementById("colors");
+let paletteIndex = 0;
 
-function setColors(palette) {
+function setColors(index) {
+  paletteIndex = index;
+  const palette = PALETTES[index];
   const root = document.documentElement.style;
   for (const part of ["bg", "fg", "dim", "quiet"]) root.setProperty("--" + part, palette[part]);
-  for (const button of colorsEl.children) {
-    button.setAttribute("aria-pressed", String(button.title === palette.name));
-  }
+  colorsButton.style.background = palette.bg;
+  colorsButton.style.color = palette.fg;
+  colorsButton.title = palette.name + ". Click for the next colors.";
+  colorsButton.setAttribute("aria-label", "Colors: " + palette.name + ". Click for the next choice.");
 }
 
-for (const palette of PALETTES) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = "12";
-  button.title = palette.name;
-  button.setAttribute("aria-label", palette.name);
-  button.style.background = palette.bg;
-  button.style.color = palette.fg;
-  button.addEventListener("click", () => {
-    setColors(palette);
-    try {
-      localStorage.setItem(COLORS_KEY, palette.name);
-    } catch {}
-  });
-  colorsEl.append(button);
-}
+colorsButton.addEventListener("click", () => {
+  setColors((paletteIndex + 1) % PALETTES.length);
+  remember(COLORS_KEY, PALETTES[paletteIndex].name);
+});
 
-let savedColors = null;
-try {
-  savedColors = localStorage.getItem(COLORS_KEY);
-} catch {}
-setColors(PALETTES.find(palette => palette.name === savedColors) || PALETTES[0]);
+const savedColors = recall(COLORS_KEY);
+setColors(Math.max(0, PALETTES.findIndex(palette => palette.name === savedColors)));
 
 // ---- Full screen and cursor ----
 if (!document.documentElement.requestFullscreen) hint.hidden = true;
 
 addEventListener("click", event => {
   keepAwake();
-  if (event.target.closest("button")) return;
+  if (event.target.closest("button, #size-row")) return;
   if (document.fullscreenElement) {
     document.exitFullscreen();
   } else if (document.documentElement.requestFullscreen) {
