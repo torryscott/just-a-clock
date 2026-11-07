@@ -40,7 +40,7 @@
   body.idle #controls { opacity: 0; pointer-events: none; }
   :fullscreen #hint { display: none; }
   #tools { display: flex; align-items: center; gap: 10px; }
-  #tools button {
+  #controls button {
     height: 34px;
     padding: 0 12px;
     border: 1px solid #888;
@@ -52,12 +52,12 @@
     line-height: 1;
     cursor: pointer;
   }
-  #tools button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+  #controls button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
   #tools button[aria-expanded="true"] { border-color: var(--fg); }
   #color-row, #size-row { display: flex; align-items: center; gap: 8px; }
   #color-row[hidden], #size-row[hidden] { display: none; }
-  #tools .swatch { width: 48px; padding: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
-  #tools .swatch[aria-pressed="true"] { outline: 3px solid var(--fg); outline-offset: 2px; }
+  #color-row .swatch { width: 48px; padding: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #color-row .swatch[aria-pressed="true"] { outline: 3px solid var(--fg); outline-offset: 2px; }
   #size-slider { width: 180px; accent-color: var(--fg); }
   #size-value { min-width: 4ch; color: var(--fg); font-variant-numeric: tabular-nums; }
 </style>
@@ -65,14 +65,14 @@
 <body>
 <div id="clock" role="timer"><span id="time"></span><span id="side"><span id="ampm"></span><span id="seconds"></span></span></div>
 <div id="controls">
+  <div id="color-row" hidden role="group" aria-label="Clock colors"></div>
+  <div id="size-row" hidden>
+    <input id="size-slider" type="range" min="25" max="100" step="1" value="100" aria-label="Clock size, as a percentage of the largest that fits">
+    <span id="size-value" aria-hidden="true">100%</span>
+  </div>
   <div id="tools">
     <button id="colors" type="button" aria-expanded="false" aria-controls="color-row">Colors</button>
     <button id="size" type="button" aria-expanded="false" aria-controls="size-row">Size</button>
-    <div id="color-row" hidden role="group" aria-label="Clock colors"></div>
-    <div id="size-row" hidden>
-      <input id="size-slider" type="range" min="25" max="100" step="1" value="100" aria-label="Clock size, as a percentage of the largest that fits">
-      <span id="size-value" aria-hidden="true">100%</span>
-    </div>
   </div>
   <div id="hint">Click the clock for full screen</div>
 </div>
@@ -213,7 +213,7 @@ async function keepAwake() {
 }
 
 // ---- Colors ----
-// The Colors button opens a row of four choices beside it.
+// The Colors button opens a row of four choices above it.
 const PALETTES = [
   { name: "White on black", bg: "#000000", fg: "#ffffff", dim: "#cccccc", quiet: "#999999" },
   { name: "Black on white", bg: "#ffffff", fg: "#000000", dim: "#333333", quiet: "#595959" },
@@ -256,7 +256,7 @@ colorsButton.addEventListener("click", () => togglePopout(colorsButton, colorRow
 }));
 
 // ---- Pop-out rows ----
-// Colors and Size each open a row beside the buttons. Opening one closes the other.
+// Colors and Size each open a row above the buttons. Opening one closes the other.
 function togglePopout(button, row, onOpen) {
   const open = row.hidden;
   for (const [b, r] of [[colorsButton, colorRow], [sizeButton, sizeRow]]) {
